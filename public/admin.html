@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Touch Racing – 관리자</title>
+<title>토끼와 거북이 – 관리자</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -296,7 +296,7 @@
 <body>
 
 <header>
-  <h1>🏎️ Touch <span>Racing</span></h1>
+  <h1>🐢 토끼와 <span>거북이</span></h1>
   <div class="header-right">
     <div class="target-display">목표: <strong id="h-target">1000</strong>번</div>
     <div class="status-chip waiting" id="status-chip">WAITING</div>
@@ -319,6 +319,11 @@
     <span class="ctrl-label">목표 터치 수</span>
     <input class="target-input" id="target-input" type="number" value="1000" min="10">
     <button class="btn btn-set" onclick="adminSetTarget()">설정</button>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">팀 수 (2~8)</span>
+    <input class="target-input" id="team-count-input" type="number" value="4" min="2" max="8">
+    <button class="btn btn-set" onclick="adminSetTeams()">설정</button>
   </div>
   <div class="url-hint">
     플레이어 접속: <strong id="player-url"></strong>
@@ -367,7 +372,7 @@
         <div class="track-body">
           <div class="track-lane"></div>
           <div class="track-progress" id="prog-${t.id}" style="background:${t.color}"></div>
-          <div class="car" id="car-${t.id}" style="color:${t.color}">🏎️</div>
+          <div class="car" id="car-${t.id}" style="color:${t.color}">🐇</div>
         </div>
         <div class="track-score" id="score-${t.id}" style="color:${t.color}">0</div>
       `;
@@ -382,20 +387,26 @@
     const trackWidth = area.querySelector('.track-body')?.offsetWidth || 600;
 
     let maxCount = 0;
+    let minCount = Infinity;
     let leaderId = null;
+    let lastId = null;
 
     teamList.forEach(t => {
       const d = teamsData[t.id];
       if (!d) return;
       if (d.count > maxCount) { maxCount = d.count; leaderId = t.id; }
+      if (d.count < minCount) { minCount = d.count; lastId = t.id; }
     });
+
+    // 모두 0이면 거북이 없음
+    const hasStarted = maxCount > 0;
 
     teamList.forEach(t => {
       const d = teamsData[t.id];
       if (!d) return;
 
       const pct = Math.min(d.count / gameTarget, 1);
-      const carLeft = pct * (trackWidth - 40) + 20; // 20px margin each side
+      const carLeft = pct * (trackWidth - 40) + 20;
 
       const prog  = document.getElementById('prog-' + t.id);
       const car   = document.getElementById('car-' + t.id);
@@ -404,15 +415,14 @@
       const row   = document.getElementById('row-' + t.id);
 
       if (prog)  prog.style.width  = (pct * 100) + '%';
-      if (car)   car.style.left    = carLeft + 'px';
+      if (car) {
+        car.style.left    = carLeft + 'px';
+        car.textContent   = (hasStarted && t.id === lastId) ? '🐢' : '🐇';
+      }
       if (score) score.textContent = d.count.toLocaleString();
       if (meta)  meta.textContent  = `👥 ${d.players}명`;
       if (row) {
-        if (d.count > 0 && t.id === leaderId) {
-          row.classList.add('leading');
-        } else {
-          row.classList.remove('leading');
-        }
+        row.classList.toggle('leading', d.count > 0 && t.id === leaderId);
       }
     });
   }
@@ -481,6 +491,7 @@
     gameTarget = state.target;
     document.getElementById('h-target').textContent = state.target.toLocaleString();
     document.getElementById('target-input').value = state.target;
+    if (state.teamCount) document.getElementById('team-count-input').value = state.teamCount;
 
     buildTracks(state);
     renderScores(state.teams);
@@ -501,6 +512,10 @@
   function adminSetTarget() {
     const val = parseInt(document.getElementById('target-input').value);
     if (!isNaN(val) && val > 0) socket.emit('admin_set_target', { target: val });
+  }
+  function adminSetTeams() {
+    const val = parseInt(document.getElementById('team-count-input').value);
+    if (!isNaN(val) && val >= 2 && val <= 8) socket.emit('admin_set_teams', { count: val });
   }
 </script>
 </body>

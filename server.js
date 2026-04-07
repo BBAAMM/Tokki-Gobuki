@@ -12,25 +12,37 @@ const io = new Server(server, {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── 팀 설정 ──────────────────────────────────────────────
-const TEAMS = [
-  { id: 'team1', name: '🔴 레드팀', color: '#FF4757' },
-  { id: 'team2', name: '🔵 블루팀', color: '#1E90FF' },
-  { id: 'team3', name: '🟢 그린팀', color: '#2ED573' },
-  { id: 'team4', name: '🟡 옐로팀', color: '#FFA502' },
-];
+const TEAM_COLORS = ['#FF4757','#1E90FF','#2ED573','#FFA502','#FF6B81','#7bed9f','#eccc68','#a29bfe'];
+
+function generateTeams(count) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `team${i + 1}`,
+    name: `${i + 1}팀`,
+    color: TEAM_COLORS[i % TEAM_COLORS.length],
+  }));
+}
 
 const DEFAULT_TARGET = 1000;
+const DEFAULT_TEAM_COUNT = 4;
 
 // ─── 게임 상태 ─────────────────────────────────────────────
 let gameState = {
   status: 'waiting',   // waiting | playing | finished
   target: DEFAULT_TARGET,
-  teams: Object.fromEntries(
-    TEAMS.map(t => [t.id, { id: t.id, name: t.name, color: t.color, count: 0, players: 0 }])
-  ),
+  teamCount: DEFAULT_TEAM_COUNT,
+  teams: {},
   winner: null,
-  teamList: TEAMS,
+  teamList: [],
 };
+
+function applyTeams(list) {
+  gameState.teamList = list;
+  gameState.teams = Object.fromEntries(
+    list.map(t => [t.id, { id: t.id, name: t.name, color: t.color, count: 0, players: 0 }])
+  );
+}
+
+applyTeams(generateTeams(DEFAULT_TEAM_COUNT));
 
 // socketId → { teamId, name }
 let playerMap = {};
@@ -41,6 +53,7 @@ function resetGame() {
   gameState.winner = null;
   for (const id in gameState.teams) {
     gameState.teams[id].count = 0;
+    gameState.teams[id].players = 0;
   }
 }
 
@@ -48,6 +61,7 @@ function getSnapshot() {
   return {
     status: gameState.status,
     target: gameState.target,
+    teamCount: gameState.teamCount,
     teams: gameState.teams,
     winner: gameState.winner,
     teamList: gameState.teamList,
@@ -127,6 +141,17 @@ io.on('connection', (socket) => {
       io.emit('game_state', getSnapshot());
       console.log(`[ADMIN] 목표 변경 → ${val}`);
     }
+  });
+
+  socket.on('admin_set_teams', ({ count }) => {
+    const val = parseInt(count);
+    if (isNaN(val) || val < 2 || val > 8) return;
+    gameState.teamCount = val;
+    playerMap = {};
+    applyTeams(generateTeams(val));
+    resetGame();
+    io.emit('game_state', getSnapshot());
+    console.log(`[ADMIN] 팀 수 변경 → ${val}`);
   });
 
   // 연결 해제
