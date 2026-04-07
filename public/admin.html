@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Touch Racing – 관리자</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #080815;
+    color: #fff;
+    height: 100vh;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+
+  /* ── 헤더 ── */
+  header {
+    padding: 18px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+  }
+
+  header h1 { font-size: 1.6rem; letter-spacing: 2px; }
+  header h1 span { color: #6c63ff; }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .status-chip {
+    padding: 6px 18px;
+    border-radius: 99px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+
+  .status-chip.waiting  { background: #2a2a3e; color: #888; }
+  .status-chip.playing  { background: #1a3a1a; color: #2ED573; animation: pulse 1.5s infinite; }
+  .status-chip.finished { background: #3a1a1a; color: #FF4757; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  .target-display {
+    font-size: 0.9rem;
+    color: #888;
+  }
+  .target-display strong { color: #fff; }
+
+  /* ── 레이싱 트랙 영역 ── */
+  #race-area {
+    padding: 20px 60px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-evenly;
+    gap: 0;
+    position: relative;
+  }
+
+  /* 결승선 */
+  .finish-line {
+    position: absolute;
+    right: 60px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: repeating-linear-gradient(
+      to bottom,
+      #fff 0px, #fff 10px,
+      transparent 10px, transparent 20px
+    );
+    opacity: 0.4;
+    z-index: 5;
+  }
+
+  .finish-label {
+    position: absolute;
+    right: 64px;
+    top: 8px;
+    font-size: 0.75rem;
+    color: #888;
+    letter-spacing: 1px;
+    writing-mode: initial;
+  }
+
+  /* 트랙 한 줄 */
+  .track-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    padding: 6px 0;
+  }
+
+  .track-label {
+    width: 130px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .track-label .team-name { font-size: 1rem; font-weight: 700; }
+  .track-label .team-meta { font-size: 0.78rem; color: #666; }
+
+  .track-body {
+    flex: 1;
+    position: relative;
+    height: 56px;
+    display: flex;
+    align-items: center;
+  }
+
+  /* 트랙 배경 라인 */
+  .track-lane {
+    position: absolute;
+    inset: 0;
+    border-radius: 8px;
+    background: repeating-linear-gradient(
+      90deg,
+      rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px,
+      transparent 1px, transparent 60px
+    );
+    border-top: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  /* 진행 바 (흔적) */
+  .track-progress {
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    border-radius: 6px;
+    opacity: 0.25;
+    transition: width 0.15s ease;
+    min-width: 0;
+  }
+
+  /* 차 아이콘 */
+  .car {
+    position: absolute;
+    font-size: 2.4rem;
+    transition: left 0.15s ease;
+    transform: translateX(-50%);
+    filter: drop-shadow(0 0 8px currentColor);
+    z-index: 2;
+    line-height: 1;
+  }
+
+  /* 점수 표시 */
+  .track-score {
+    width: 110px;
+    flex-shrink: 0;
+    text-align: right;
+    padding-right: 8px;
+    font-size: 1.3rem;
+    font-weight: 800;
+    transition: all 0.15s;
+  }
+
+  /* 1위 표시 */
+  .track-row.leading .track-label .team-name::before {
+    content: '👑 ';
+  }
+
+  /* ── 컨트롤 패널 ── */
+  footer {
+    padding: 16px 40px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    flex-wrap: wrap;
+  }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .ctrl-label {
+    font-size: 0.8rem;
+    color: #666;
+    white-space: nowrap;
+  }
+
+  .btn {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.5px;
+  }
+
+  .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+  .btn:active { transform: scale(0.97); }
+
+  .btn-start  { background: #2ED573; color: #000; }
+  .btn-reset  { background: #333; color: #fff; }
+
+  .target-input {
+    width: 90px;
+    padding: 9px 12px;
+    background: #1a1a2e;
+    border: 1.5px solid #333;
+    border-radius: 10px;
+    color: #fff;
+    font-size: 0.95rem;
+    text-align: center;
+    outline: none;
+  }
+  .target-input:focus { border-color: #6c63ff; }
+
+  .btn-set { background: #6c63ff; color: #fff; }
+
+  /* URL 힌트 */
+  .url-hint {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: #444;
+  }
+  .url-hint strong { color: #666; }
+
+  /* ── 우승 오버레이 ── */
+  #win-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(8,8,21,0.85);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 20px;
+    backdrop-filter: blur(6px);
+  }
+
+  #win-overlay.show { display: flex; }
+
+  .confetti-text {
+    font-size: 5rem;
+    animation: bounce 0.6s ease infinite alternate;
+  }
+
+  @keyframes bounce {
+    from { transform: scale(1); }
+    to   { transform: scale(1.08); }
+  }
+
+  .win-team-name {
+    font-size: 3rem;
+    font-weight: 900;
+    letter-spacing: 2px;
+  }
+
+  .win-sub {
+    font-size: 1.1rem;
+    color: #aaa;
+  }
+
+  .firework {
+    position: fixed;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    animation: firework-anim 1s ease-out forwards;
+    pointer-events: none;
+  }
+
+  @keyframes firework-anim {
+    0%   { transform: translate(0,0) scale(1); opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)) scale(0); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏎️ Touch <span>Racing</span></h1>
+  <div class="header-right">
+    <div class="target-display">목표: <strong id="h-target">1000</strong>번</div>
+    <div class="status-chip waiting" id="status-chip">WAITING</div>
+  </div>
+</header>
+
+<div id="race-area">
+  <div class="finish-line"></div>
+  <div class="finish-label">GOAL</div>
+  <!-- JS로 트랙 생성 -->
+</div>
+
+<footer>
+  <div class="ctrl-group">
+    <span class="ctrl-label">게임 제어</span>
+    <button class="btn btn-start" id="btn-start" onclick="adminStart()">▶ 시작</button>
+    <button class="btn btn-reset" onclick="adminReset()">↺ 리셋</button>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">목표 터치 수</span>
+    <input class="target-input" id="target-input" type="number" value="1000" min="10">
+    <button class="btn btn-set" onclick="adminSetTarget()">설정</button>
+  </div>
+  <div class="url-hint">
+    플레이어 접속: <strong id="player-url"></strong>
+  </div>
+</footer>
+
+<!-- 우승 오버레이 -->
+<div id="win-overlay">
+  <div class="confetti-text">🎉</div>
+  <div class="win-team-name" id="win-name"></div>
+  <div class="win-sub">우승! 최종 터치 수: <strong id="win-count"></strong></div>
+</div>
+
+<script>
+  const socket = io();
+  let gameTarget = 1000;
+  let teams = {};
+  let teamList = [];
+  let currentStatus = 'waiting';
+  let winShown = false;
+
+  // ── 플레이어 URL 표시 ──────────────────────────────────
+  const urlEl = document.getElementById('player-url');
+  urlEl.textContent = location.origin + '/player.html';
+
+  // ── 트랙 초기화 ────────────────────────────────────────
+  function buildTracks(state) {
+    teamList = state.teamList;
+    teams = state.teams;
+    gameTarget = state.target;
+
+    const area = document.getElementById('race-area');
+    // 기존 트랙 행만 제거 (finish line 유지)
+    area.querySelectorAll('.track-row').forEach(e => e.remove());
+
+    teamList.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'track-row';
+      row.id = 'row-' + t.id;
+
+      row.innerHTML = `
+        <div class="track-label">
+          <div class="team-name" style="color:${t.color}">${t.name}</div>
+          <div class="team-meta" id="meta-${t.id}">👥 0명</div>
+        </div>
+        <div class="track-body">
+          <div class="track-lane"></div>
+          <div class="track-progress" id="prog-${t.id}" style="background:${t.color}"></div>
+          <div class="car" id="car-${t.id}" style="color:${t.color}">🏎️</div>
+        </div>
+        <div class="track-score" id="score-${t.id}" style="color:${t.color}">0</div>
+      `;
+
+      area.appendChild(row);
+    });
+  }
+
+  // ── 점수 업데이트 렌더 ─────────────────────────────────
+  function renderScores(teamsData) {
+    const area = document.getElementById('race-area');
+    const trackWidth = area.querySelector('.track-body')?.offsetWidth || 600;
+
+    let maxCount = 0;
+    let leaderId = null;
+
+    teamList.forEach(t => {
+      const d = teamsData[t.id];
+      if (!d) return;
+      if (d.count > maxCount) { maxCount = d.count; leaderId = t.id; }
+    });
+
+    teamList.forEach(t => {
+      const d = teamsData[t.id];
+      if (!d) return;
+
+      const pct = Math.min(d.count / gameTarget, 1);
+      const carLeft = pct * (trackWidth - 40) + 20; // 20px margin each side
+
+      const prog  = document.getElementById('prog-' + t.id);
+      const car   = document.getElementById('car-' + t.id);
+      const score = document.getElementById('score-' + t.id);
+      const meta  = document.getElementById('meta-' + t.id);
+      const row   = document.getElementById('row-' + t.id);
+
+      if (prog)  prog.style.width  = (pct * 100) + '%';
+      if (car)   car.style.left    = carLeft + 'px';
+      if (score) score.textContent = d.count.toLocaleString();
+      if (meta)  meta.textContent  = `👥 ${d.players}명`;
+      if (row) {
+        if (d.count > 0 && t.id === leaderId) {
+          row.classList.add('leading');
+        } else {
+          row.classList.remove('leading');
+        }
+      }
+    });
+  }
+
+  // ── 상태 UI ────────────────────────────────────────────
+  function syncStatus(status, winner, teamsData) {
+    currentStatus = status;
+    const chip  = document.getElementById('status-chip');
+    const btnStart = document.getElementById('btn-start');
+
+    chip.className = 'status-chip ' + status;
+
+    if (status === 'waiting') {
+      chip.textContent = 'WAITING';
+      btnStart.disabled = false;
+      btnStart.textContent = '▶ 시작';
+    } else if (status === 'playing') {
+      chip.textContent = '● LIVE';
+      btnStart.disabled = true;
+      btnStart.textContent = '진행 중';
+    } else if (status === 'finished') {
+      chip.textContent = 'FINISHED';
+      btnStart.disabled = true;
+      if (!winShown && winner && teamsData) {
+        winShown = true;
+        showWin(winner, teamsData[winner]);
+      }
+    }
+  }
+
+  function showWin(winnerId, teamData) {
+    const overlay = document.getElementById('win-overlay');
+    const nameEl  = document.getElementById('win-name');
+    const countEl = document.getElementById('win-count');
+
+    nameEl.textContent  = teamData?.name || winnerId;
+    nameEl.style.color  = teamData?.color || '#fff';
+    countEl.textContent = teamData?.count?.toLocaleString() || '?';
+
+    overlay.classList.add('show');
+    overlay.addEventListener('click', () => overlay.classList.remove('show'), { once: true });
+
+    // 폭죽 파티클
+    for (let i = 0; i < 60; i++) {
+      setTimeout(() => spawnFirework(teamData?.color || '#fff'), Math.random() * 1200);
+    }
+  }
+
+  function spawnFirework(color) {
+    const el = document.createElement('div');
+    el.className = 'firework';
+    el.style.background = color;
+    el.style.left = (20 + Math.random() * 60) + 'vw';
+    el.style.top  = (10 + Math.random() * 60) + 'vh';
+    const angle = Math.random() * 360;
+    const dist  = 60 + Math.random() * 120;
+    el.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+    el.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 1000);
+  }
+
+  // ── 소켓 ───────────────────────────────────────────────
+  socket.on('game_state', (state) => {
+    teams = state.teams;
+    gameTarget = state.target;
+    document.getElementById('h-target').textContent = state.target.toLocaleString();
+    document.getElementById('target-input').value = state.target;
+
+    buildTracks(state);
+    renderScores(state.teams);
+    syncStatus(state.status, state.winner, state.teams);
+
+    if (state.status !== 'finished') winShown = false;
+  });
+
+  socket.on('score_update', (data) => {
+    teams = data.teams;
+    renderScores(data.teams);
+    syncStatus(data.status, data.winner, data.teams);
+  });
+
+  // ── 관리자 액션 ────────────────────────────────────────
+  function adminStart()     { socket.emit('admin_start'); }
+  function adminReset()     { socket.emit('admin_reset'); }
+  function adminSetTarget() {
+    const val = parseInt(document.getElementById('target-input').value);
+    if (!isNaN(val) && val > 0) socket.emit('admin_set_target', { target: val });
+  }
+</script>
+</body>
+</html>

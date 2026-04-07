@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Touch Racing – 플레이어</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --team-color: #888;
+  }
+
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #0d0d1a;
+    color: #fff;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── 팀 선택 화면 ── */
+  #screen-select {
+    width: 100%;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  #screen-select h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+
+  #screen-select p {
+    font-size: 0.9rem;
+    color: #aaa;
+    margin-top: -8px;
+  }
+
+  #name-input {
+    width: 100%;
+    max-width: 320px;
+    padding: 12px 16px;
+    background: #1a1a2e;
+    border: 1.5px solid #333;
+    border-radius: 12px;
+    color: #fff;
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #name-input:focus { border-color: #6c63ff; }
+
+  .team-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    width: 100%;
+    max-width: 320px;
+  }
+
+  .team-btn {
+    padding: 18px 12px;
+    border: 2px solid transparent;
+    border-radius: 16px;
+    background: #1a1a2e;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .team-btn:hover { transform: translateY(-2px); }
+  .team-btn .team-players { font-size: 0.75rem; color: #aaa; font-weight: 400; }
+
+  /* ── 터치 화면 ── */
+  #screen-game {
+    display: none;
+    width: 100%;
+    height: 100dvh;
+    flex-direction: column;
+  }
+
+  .game-header {
+    padding: 16px 20px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .game-header .team-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 1rem;
+  }
+
+  .team-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--team-color);
+  }
+
+  .game-header .my-score {
+    font-size: 0.85rem;
+    color: #aaa;
+  }
+
+  .game-header .my-score span {
+    color: #fff;
+    font-weight: 700;
+  }
+
+  /* 팀 점수 바 */
+  .score-bar-wrap {
+    padding: 12px 20px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .score-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: #aaa;
+    margin-bottom: 6px;
+  }
+
+  .score-label strong { color: #fff; }
+
+  .bar-track {
+    height: 10px;
+    background: #1a1a2e;
+    border-radius: 99px;
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    height: 100%;
+    background: var(--team-color);
+    border-radius: 99px;
+    transition: width 0.15s ease;
+    min-width: 4px;
+    width: 0%;
+  }
+
+  /* 터치 영역 */
+  #touch-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #touch-area.waiting {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .tap-ring {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    border: 3px solid var(--team-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: transform 0.08s ease;
+  }
+
+  .tap-ring.pressed { transform: scale(0.92); }
+
+  .tap-ring-inner {
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    background: var(--team-color);
+    opacity: 0.15;
+    position: absolute;
+  }
+
+  .tap-count {
+    font-size: 3rem;
+    font-weight: 800;
+    position: relative;
+    z-index: 1;
+  }
+
+  .tap-label {
+    font-size: 0.85rem;
+    color: #888;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  /* 리플 이펙트 */
+  .ripple {
+    position: absolute;
+    border-radius: 50%;
+    width: 80px;
+    height: 80px;
+    background: var(--team-color);
+    opacity: 0.4;
+    transform: scale(0);
+    animation: ripple-anim 0.5s ease-out forwards;
+    pointer-events: none;
+  }
+
+  @keyframes ripple-anim {
+    to { transform: scale(6); opacity: 0; }
+  }
+
+  /* 상태 메시지 */
+  .status-msg {
+    font-size: 0.9rem;
+    color: #888;
+    text-align: center;
+    padding: 0 20px;
+  }
+
+  /* 대기/종료 오버레이 */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(13,13,26,0.88);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    z-index: 10;
+  }
+
+  .overlay h2 { font-size: 1.6rem; }
+  .overlay p  { color: #aaa; font-size: 0.95rem; }
+
+  .winner-badge {
+    font-size: 2rem;
+    font-weight: 800;
+    padding: 12px 24px;
+    border-radius: 16px;
+    border: 3px solid currentColor;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── 팀 선택 화면 ── -->
+<div id="screen-select">
+  <h1>🏎️ Touch Racing</h1>
+  <p>이름을 입력하고 팀을 선택하세요</p>
+  <input id="name-input" type="text" placeholder="닉네임 입력" maxlength="12" autocomplete="off">
+  <div class="team-grid" id="team-grid">
+    <!-- JS로 채움 -->
+  </div>
+</div>
+
+<!-- ── 터치 화면 ── -->
+<div id="screen-game">
+  <div class="game-header">
+    <div class="team-badge">
+      <div class="team-dot" id="header-dot"></div>
+      <span id="header-team-name">팀</span>
+    </div>
+    <div class="my-score">내 터치: <span id="my-count">0</span></div>
+  </div>
+
+  <div class="score-bar-wrap">
+    <div class="score-label">
+      <span>팀 터치 수</span>
+      <span><strong id="team-count-label">0</strong> / <span id="target-label">1000</span></span>
+    </div>
+    <div class="bar-track">
+      <div class="bar-fill" id="bar-fill"></div>
+    </div>
+  </div>
+
+  <div id="touch-area" class="waiting">
+    <div id="overlay-waiting" class="overlay">
+      <h2>⏳ 대기 중</h2>
+      <p>관리자가 게임을 시작하면<br>터치할 수 있어요</p>
+    </div>
+    <div id="overlay-finished" class="overlay" style="display:none">
+      <h2>🏁 게임 종료!</h2>
+      <div class="winner-badge" id="winner-badge"></div>
+    </div>
+
+    <div class="tap-ring" id="tap-ring">
+      <div class="tap-ring-inner"></div>
+      <span class="tap-count" id="tap-count">0</span>
+    </div>
+    <span class="tap-label">TAP!</span>
+    <span class="status-msg" id="status-msg"></span>
+  </div>
+</div>
+
+<script>
+  const socket = io();
+  let myTeamId = null;
+  let myTeamColor = '#888';
+  let myCount = 0;
+  let gameTarget = 1000;
+  let teamData = {};
+
+  // ── 팀 선택 화면 렌더 ──────────────────────────────────
+  function renderTeamSelect(state) {
+    const grid = document.getElementById('team-grid');
+    grid.innerHTML = '';
+    state.teamList.forEach(t => {
+      const team = state.teams[t.id];
+      const btn = document.createElement('button');
+      btn.className = 'team-btn';
+      btn.style.borderColor = t.color;
+      btn.style.boxShadow = `0 0 12px ${t.color}44`;
+      btn.innerHTML = `
+        <span>${t.name}</span>
+        <span class="team-players">👥 ${team.players}명</span>
+      `;
+      btn.addEventListener('click', () => joinTeam(t.id, t.name, t.color));
+      grid.appendChild(btn);
+    });
+    gameTarget = state.target;
+  }
+
+  function joinTeam(teamId, teamName, teamColor) {
+    const name = document.getElementById('name-input').value.trim() || '익명';
+    myTeamId = teamId;
+    myTeamColor = teamColor;
+    document.documentElement.style.setProperty('--team-color', teamColor);
+    socket.emit('join_team', { teamId, playerName: name });
+  }
+
+  // ── 게임 화면 전환 ──────────────────────────────────────
+  socket.on('joined', ({ teamId, playerName }) => {
+    document.getElementById('screen-select').style.display = 'none';
+    document.getElementById('screen-game').style.display = 'flex';
+    document.getElementById('header-dot').style.background = myTeamColor;
+    // teamData에서 name 가져오기
+    const tName = teamData[teamId]?.name || teamId;
+    document.getElementById('header-team-name').textContent = tName;
+  });
+
+  // ── 상태 수신 ──────────────────────────────────────────
+  socket.on('game_state', (state) => {
+    teamData = state.teams;
+    gameTarget = state.target;
+    document.getElementById('target-label').textContent = state.target;
+
+    if (!myTeamId) {
+      renderTeamSelect(state);
+    } else {
+      syncTeamUI(state);
+    }
+    syncStatus(state.status, state.winner);
+  });
+
+  socket.on('score_update', (data) => {
+    teamData = data.teams;
+    if (myTeamId) {
+      const team = data.teams[myTeamId];
+      updateTeamScore(team);
+    }
+    syncStatus(data.status, data.winner);
+  });
+
+  function syncTeamUI(state) {
+    if (!myTeamId) return;
+    const team = state.teams[myTeamId];
+    if (team) updateTeamScore(team);
+    document.getElementById('header-team-name').textContent = team?.name || '';
+  }
+
+  function updateTeamScore(team) {
+    if (!team) return;
+    const pct = Math.min((team.count / gameTarget) * 100, 100);
+    document.getElementById('team-count-label').textContent = team.count;
+    document.getElementById('bar-fill').style.width = pct + '%';
+  }
+
+  // ── 상태별 UI ──────────────────────────────────────────
+  function syncStatus(status, winner) {
+    const area = document.getElementById('touch-area');
+    const waiting = document.getElementById('overlay-waiting');
+    const finished = document.getElementById('overlay-finished');
+
+    if (status === 'waiting') {
+      area.classList.add('waiting');
+      waiting.style.display = 'flex';
+      finished.style.display = 'none';
+    } else if (status === 'playing') {
+      area.classList.remove('waiting');
+      waiting.style.display = 'none';
+      finished.style.display = 'none';
+    } else if (status === 'finished') {
+      area.classList.add('waiting');
+      waiting.style.display = 'none';
+      finished.style.display = 'flex';
+      const winTeam = teamData[winner];
+      const badge = document.getElementById('winner-badge');
+      badge.textContent = (winTeam?.name || winner) + ' 우승! 🎉';
+      badge.style.color = winTeam?.color || '#fff';
+      badge.style.borderColor = winTeam?.color || '#fff';
+    }
+  }
+
+  // ── 터치 이벤트 ────────────────────────────────────────
+  const touchArea = document.getElementById('touch-area');
+  const tapRing   = document.getElementById('tap-ring');
+  const tapCount  = document.getElementById('tap-count');
+  const myCountEl = document.getElementById('my-count');
+
+  function handleTap(e) {
+    if (touchArea.classList.contains('waiting')) return;
+    socket.emit('touch');
+    myCount++;
+    tapCount.textContent = myCount;
+    myCountEl.textContent = myCount;
+
+    // 애니메이션
+    tapRing.classList.add('pressed');
+    setTimeout(() => tapRing.classList.remove('pressed'), 80);
+
+    // 리플
+    const rect = touchArea.getBoundingClientRect();
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    const ripple = document.createElement('div');
+    ripple.className = 'ripple';
+    ripple.style.left = (x - 40) + 'px';
+    ripple.style.top  = (y - 40) + 'px';
+    touchArea.appendChild(ripple);
+    setTimeout(() => ripple.remove(), 500);
+  }
+
+  touchArea.addEventListener('touchstart', e => { e.preventDefault(); handleTap(e); }, { passive: false });
+  touchArea.addEventListener('mousedown', handleTap);
+</script>
+</body>
+</html>
